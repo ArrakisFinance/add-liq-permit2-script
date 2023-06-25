@@ -1,26 +1,28 @@
-const ethjsu = require("ethereumjs-util");
+//const ethjsu = require("ethereumjs-util");
 const p2sdk = require("@uniswap/permit2-sdk");
 const dotenv = require("dotenv");
 const ethers = require("ethers");
 const routerABI = require('./routerabi.json');
 
-const sign = (msgHash, privKey) => {
-    const hash = Buffer.alloc(32, msgHash.slice(2), "hex");
-    const priv = Buffer.alloc(32, privKey.slice(2), "hex");
-    return ethjsu.ecsign(hash, priv);
-};
+// const sign = (msgHash, privKey) => {
+//     const hash = Buffer.alloc(32, msgHash.slice(2), "hex");
+//     const priv = Buffer.alloc(32, privKey.slice(2), "hex");
+//     return ethjsu.ecsign(hash, priv);
+// };
 
 // env
 dotenv.config({ path: __dirname + "/.env" });
 const ALCHEMY_ID = process.env.ALCHEMY_ID;
 const PK = process.env.PK;
+
+/// @note run against polygon mainnet
 const providerURL = `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_ID}`;
 
 // constants
 const DEADLINE = "999999999999999";
-const NONCE = "100";
+const NONCE = "111";
 const AMOUNT0 = "50000";
-const AMOUNT1 = "1000000000000";
+const AMOUNT1 = "10000000000000";
 
 const TOKEN0_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 const TOKEN1_ADDRESS = "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619";
@@ -31,28 +33,28 @@ const VAULT_ADDRESS = "0x00A1DF29047dc005c192e50EC87798dbAb816f39";
 const main = async () => {
     const provider = new ethers.JsonRpcProvider(providerURL);
     const wallet = new ethers.Wallet(PK, provider);
-    const token0 = new ethers.Contract(TOKEN0_ADDRESS, ["function approve(address,uint256) external returns (bool)"], wallet);
-    const token1 = new ethers.Contract(TOKEN1_ADDRESS, ["function approve(address,uint256) external returns (bool)"], wallet);
     const router = new ethers.Contract(ROUTER_ADDRESS, routerABI, wallet);
 
     /// @note comment out if already done
+    const token0 = new ethers.Contract(TOKEN0_ADDRESS, ["function approve(address,uint256) external returns (bool)"], wallet);
+    const token1 = new ethers.Contract(TOKEN1_ADDRESS, ["function approve(address,uint256) external returns (bool)"], wallet);
     console.log("approving...");
     await token0.approve(PERMIT2_ADDRESS, ethers.MaxUint256, {gasLimit: 100000, maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
     const tx1 = await token1.approve(PERMIT2_ADDRESS, ethers.MaxUint256, {gasLimit: 100000, maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
     await tx1.wait();
 
     console.log("signing permit...");
-    const hashed = p2sdk.SignatureTransfer.hash(
+    const permitData = p2sdk.SignatureTransfer.getPermitData(
         {
             permitted: [
-            {
-                token: TOKEN0_ADDRESS,
-                amount: AMOUNT0,
-            },
-            {
-                token: TOKEN1_ADDRESS,
-                amount: AMOUNT1,
-            },
+                {
+                    token: TOKEN0_ADDRESS,
+                    amount: AMOUNT0,
+                },
+                {
+                    token: TOKEN1_ADDRESS,
+                    amount: AMOUNT1,
+                },
             ],
             spender: ROUTER_ADDRESS,
             nonce: NONCE,
@@ -61,18 +63,20 @@ const main = async () => {
         PERMIT2_ADDRESS,
         137
     );
+    console.log(permitData.values);
+    const finalSig = await wallet.signTypedData(permitData.domain, permitData.types, permitData.values)
+    console.log(finalSig);
+    // const sig = sign(
+    //     hashed,
+    //     PK
+    // );
+    // const abiCoder = ethers.AbiCoder.defaultAbiCoder()
+    // const encodedSig = abiCoder.encode(
+    //     ["bytes32", "bytes32"],
+    //     ["0x" + sig.r.toString("hex"), "0x" + sig.s.toString("hex")]
+    // );
 
-    const sig = sign(
-        hashed,
-        PK
-    );
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder()
-    const encodedSig = abiCoder.encode(
-        ["bytes32", "bytes32"],
-        ["0x" + sig.r.toString("hex"), "0x" + sig.s.toString("hex")]
-    );
-
-    const finalSig = encodedSig + sig.v.toString(16);
+    // const finalSig = encodedSig + sig.v.toString(16);
 
     const addLiquidityData = {
         amount0Max: AMOUNT0,
@@ -104,6 +108,8 @@ const main = async () => {
         signature: finalSig,
     };
 
+    console.log("simulating add...")
+    await router.addLiquidityPermit2.estimateGas(addLiquidityPermit2Data,  {maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
     console.log("adding liquidity...")
     const tx = await router.addLiquidityPermit2(addLiquidityPermit2Data, {gasLimit: 5000000, maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
 
