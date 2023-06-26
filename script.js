@@ -1,14 +1,7 @@
-const ethjsu = require("ethereumjs-util");
 const p2sdk = require("@uniswap/permit2-sdk");
 const dotenv = require("dotenv");
 const ethers = require("ethers");
 const routerABI = require('./routerabi.json');
-
-const sign = (msgHash, privKey) => {
-    const hash = Buffer.alloc(32, msgHash.slice(2), "hex");
-    const priv = Buffer.alloc(32, privKey.slice(2), "hex");
-    return ethjsu.ecsign(hash, priv);
-};
 
 // env
 dotenv.config({ path: __dirname + "/.env" });
@@ -22,7 +15,8 @@ const providerURL = `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_ID}`;
 const DEADLINE = "999999999999999";
 const NONCE = "1003";
 const AMOUNT0 = "50000";
-const AMOUNT1 = "100000000000";
+const AMOUNT1_WORKS = "100000000000";
+const AMOUNT1_FAILS = "10000000000000";
 
 const TOKEN0_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 const TOKEN1_ADDRESS = "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619";
@@ -53,7 +47,7 @@ const main = async () => {
                 },
                 {
                     token: TOKEN1_ADDRESS,
-                    amount: AMOUNT1,
+                    amount: AMOUNT1_WORKS,
                 },
             ],
             spender: ROUTER_ADDRESS,
@@ -64,47 +58,33 @@ const main = async () => {
         137
     );
 
-    // const hashed = p2sdk.SignatureTransfer.hash(
-    //     {
-    //         permitted: [
-    //             {
-    //                 token: TOKEN0_ADDRESS,
-    //                 amount: AMOUNT0,
-    //             },
-    //             {
-    //                 token: TOKEN1_ADDRESS,
-    //                 amount: AMOUNT1,
-    //             },
-    //         ],
-    //         spender: ROUTER_ADDRESS,
-    //         nonce: NONCE,
-    //         deadline: DEADLINE,
-    //     },
-    //     PERMIT2_ADDRESS,
-    //     137
-    // );
-
-    // const hashed2 = ethers.TypedDataEncoder.hash(permitData.domain, permitData.types, permitData.values)
-
-    // console.log("should be true:", hashed==hashed2);
-
-    // const sig = sign(
-    //     hashed,
-    //     PK
-    // );
-    // const abiCoder = ethers.AbiCoder.defaultAbiCoder()
-    // const encodedSig = abiCoder.encode(
-    //     ["bytes32", "bytes32"],
-    //     ["0x" + sig.r.toString("hex"), "0x" + sig.s.toString("hex")]
-    // );
-
-    // const finalSig = encodedSig + sig.v.toString(16);
+    const permitData2 = p2sdk.SignatureTransfer.getPermitData(
+        {
+            permitted: [
+                {
+                    token: TOKEN0_ADDRESS,
+                    amount: AMOUNT0,
+                },
+                {
+                    token: TOKEN1_ADDRESS,
+                    amount: AMOUNT1_FAILS,
+                },
+            ],
+            spender: ROUTER_ADDRESS,
+            nonce: NONCE,
+            deadline: DEADLINE,
+        },
+        PERMIT2_ADDRESS,
+        137
+    );
 
     const finalSig = await wallet.signTypedData(permitData.domain, permitData.types, permitData.values)
 
+    const finalSig2 = await wallet.signTypedData(permitData2.domain, permitData2.types, permitData2.values)
+
     const addLiquidityData = {
         amount0Max: AMOUNT0,
-        amount1Max: AMOUNT1,
+        amount1Max: AMOUNT1_WORKS,
         amount0Min: 0,
         amount1Min: 0,
         amountSharesMin: 0,
@@ -123,7 +103,7 @@ const main = async () => {
             },
             {
                 token: TOKEN1_ADDRESS,
-                amount: AMOUNT1,
+                amount: AMOUNT1_WORKS,
             },
             ],
             nonce: NONCE,
@@ -134,10 +114,41 @@ const main = async () => {
 
     console.log("simulating add...")
     await router.addLiquidityPermit2.estimateGas(addLiquidityPermit2Data,  {maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
-    console.log("adding liquidity...")
-    const tx = await router.addLiquidityPermit2(addLiquidityPermit2Data,  {gasLimit: 5000000, maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")})
+    console.log("worked! (as expected)");
 
-    console.log(tx.hash);
+    const addLiquidityData2 = {
+        amount0Max: AMOUNT0,
+        amount1Max: AMOUNT1_FAILS,
+        amount0Min: 0,
+        amount1Min: 0,
+        amountSharesMin: 0,
+        vault: VAULT_ADDRESS,
+        receiver: wallet.address,
+        gauge: ethers.ZeroAddress,
+    };
+
+    const addLiquidityPermit2Data2 = {
+        addData: addLiquidityData2,
+        permit: {
+            permitted: [
+            {
+                token: TOKEN0_ADDRESS,
+                amount: AMOUNT0,
+            },
+            {
+                token: TOKEN1_ADDRESS,
+                amount: AMOUNT1_FAILS,
+            },
+            ],
+            nonce: NONCE,
+            deadline: DEADLINE,
+        },
+        signature: finalSig2,
+    };
+
+    console.log("simulating add again...");
+    await router.addLiquidityPermit2.estimateGas(addLiquidityPermit2Data2,  {maxFeePerGas: ethers.parseUnits("500", "gwei"), maxPriorityFeePerGas: ethers.parseUnits("40", "gwei")});
+    console.log("if you get here then problem solved, but you wont get here");
 }
 
 main()
